@@ -118,6 +118,18 @@ func (g *Transaction) WriteHashObjectFile(filePath string) (string, error) {
 	return g.returnString(cmd)
 }
 
+// git ls-files 'node/a63/84389-70d7-4199-9d90-4b8b9ba8e3d6'
+// LsFiles returns the file paths that could be found by the given wildcard
+func (t *Transaction) LsFiles(wildcard string) ([]string, error) {
+	cmd := t.Cmd("ls-files", wildcard)
+	out, err := t.returnString(cmd)
+	if err != nil {
+		return nil, err
+	}
+	res := strings.Split(strings.TrimSpace(out), "\n")
+	return res, nil
+}
+
 // ReadCatFile reads the object with the given sha1 and writes it to the given writer
 func (g *Transaction) ReadCatFile(sha1 string, wr io.Writer) error {
 	cmd := g.Cmd("cat-file", "-p", sha1)
