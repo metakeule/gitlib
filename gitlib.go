@@ -291,13 +291,13 @@ func (g *Transaction) SetSymbolicTagsRef(symref, tagsRef string) error {
 	return cmd.Run()
 }
 
-func (g *Transaction) PushTags(branch, remote string) error {
-	cmd := g.Cmd("push", "--tags", remote, branch)
+func (g *Transaction) PushTags() error {
+	cmd := g.Cmd("push", "--tags")
 	return cmd.Run()
 }
 
-func (g *Transaction) PushAll(remote string) error {
-	cmd := g.Cmd("push", "--all", remote)
+func (g *Transaction) PushAll() error {
+	cmd := g.Cmd("push", "--all")
 	return cmd.Run()
 }
 
