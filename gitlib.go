@@ -291,6 +291,16 @@ func (g *Transaction) SetSymbolicTagsRef(symref, tagsRef string) error {
 	return cmd.Run()
 }
 
+func (g *Transaction) PushTags(branch, remote string) error {
+	cmd := g.Cmd("push", "--tags", remote, branch)
+	return cmd.Run()
+}
+
+func (g *Transaction) PushAll(remote string) error {
+	cmd := g.Cmd("push", "--all", remote)
+	return cmd.Run()
+}
+
 // git tag -a v1.1 1a410efbd13591db07496601ebc7a059dd55cfe9 -m 'test tag'
 func (g *Transaction) Tag(tag, sha1, message string) error {
 	params := []string{"tag", tag, sha1}
