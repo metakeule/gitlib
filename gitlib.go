@@ -301,7 +301,7 @@ func (g *Transaction) Tag(tag, sha1, message string) error {
 	return cmd.Run()
 }
 
-func (g *Transaction) Tags(tag string) ([]string, error) {
+func (g *Transaction) Tags() ([]string, error) {
 	// params := []string{"tag"}
 	cmd := g.Cmd("tag")
 	str, err := g.returnString(cmd)
