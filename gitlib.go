@@ -15,7 +15,7 @@ type Git struct {
 	BinaryPath string
 	Env        []string
 	Debug      bool
-	dir        string
+	Dir        string
 	mu         *sync.Mutex
 }
 
@@ -24,7 +24,7 @@ type Git struct {
 func NewGit(dir string) (g *Git, err error) {
 	g = &Git{}
 	g.mu = &sync.Mutex{}
-	g.dir, err = filepath.Abs(dir)
+	g.Dir, err = filepath.Abs(dir)
 	if err != nil {
 		return
 	}
@@ -39,7 +39,7 @@ func NewGit(dir string) (g *Git, err error) {
 }
 
 func (g *Git) IsInitialized() bool {
-	dir := filepath.Join(g.dir, ".git")
+	dir := filepath.Join(g.Dir, ".git")
 	info, err := os.Stat(dir)
 	if err != nil {
 		return false
@@ -53,6 +53,7 @@ func (g *Git) IsInitialized() bool {
 // run the given commands, preventing other commands to be run at the same time, stopping
 // at the first error and returning it
 func (g *Git) Transaction(cmds ...func(*Transaction) error) error {
+	// fmt.Println("starting transaction")
 	g.mu.Lock()
 	defer g.mu.Unlock()
 
@@ -79,7 +80,7 @@ func (g *Transaction) Cmd(params ...string) (cmd *exec.Cmd) {
 	}
 	cmd = exec.Command(g.BinaryPath, params...)
 	cmd.Env = g.Env
-	cmd.Dir = g.dir
+	cmd.Dir = g.Dir
 	return cmd
 }
 
@@ -103,12 +104,40 @@ func (g *Transaction) Init() error {
 	return err
 }
 
+func (g *Transaction) InitBare() error {
+	_, err := g.Exec("init", "--bare")
+	return err
+}
+
+//  git ls-files 'node/pools/a63/84389-70d7-4199-9d90-4b8b9ba8e3d6'
+func (t *Transaction) IsFileKnown(filepath string) (bool, error) {
+	// fmt.Println("checking for known file of path", filepath)
+	files, err := t.LsFiles(filepath)
+	if err != nil {
+		return false, err
+	}
+	if len(files) != 1 {
+		return false, nil
+	}
+	return files[0] == filepath, nil
+}
+
 // WriteHashObject writes the content of the given reader to the repository inside the given
 // directory. It returns the sha1 hash on success and an error otherwise
 func (g *Transaction) WriteHashObject(rd io.Reader) (string, error) {
 	cmd := g.Cmd("hash-object", "-w", "--stdin")
 	cmd.Stdin = rd
 	return g.returnString(cmd)
+}
+
+func (t *Transaction) ResetToHead(path string) error {
+	cmd := t.Cmd("reset", "HEAD", "--", path)
+	return cmd.Run()
+}
+
+// git reset HEAD -- .
+func (t *Transaction) ResetToHeadAll() error {
+	return t.ResetToHead(".")
 }
 
 // WriteHashObjectFile writes the content of the given file to the repository inside the given
@@ -126,7 +155,12 @@ func (t *Transaction) LsFiles(wildcard string) ([]string, error) {
 	if err != nil {
 		return nil, err
 	}
-	res := strings.Split(strings.TrimSpace(out), "\n")
+	out = strings.TrimSpace(out)
+	if out == "" {
+		return nil, nil
+	}
+	// fmt.Printf("lsfiles out: %#v\n", out)
+	res := strings.Split(out, "\n")
 	return res, nil
 }
 
@@ -213,6 +247,7 @@ func (g *Transaction) ReadTree(prefix, sha1 string) error {
 
 // git commit-tree d8329f
 func (g *Transaction) CommitTree(sha1, parent string, message io.Reader) (string, error) {
+	// fmt.Printf("committing: %#v with parent %#v\n", sha1, parent)
 	params := []string{"commit-tree", sha1}
 	if parent != "" {
 		params = append(params, "-p", parent)
@@ -226,37 +261,6 @@ func (g *Transaction) ShowHeadsRef(ref string) (string, error) {
 	// git show-ref --hash --heads refs/heads/master
 	cmd := g.Cmd("show-ref", "--hash", "--heads", "refs/heads/"+ref)
 	return g.returnString(cmd)
-}
-
-func (g *Transaction) InitWithReadme(readmeContent io.Reader) (err error) {
-	var sha1 string
-
-	err = g.Init()
-	if err != nil {
-		return err
-	}
-
-	sha1, err = g.WriteHashObject(readmeContent)
-	if err != nil {
-		return err
-	}
-
-	err = g.AddIndexCache(sha1, "README.md")
-	if err != nil {
-		return err
-	}
-
-	sha1, err = g.WriteTree()
-	if err != nil {
-		return err
-	}
-
-	sha1, err = g.CommitTree(sha1, "", strings.NewReader("initial commit with readme"))
-	if err != nil {
-		return err
-	}
-
-	return g.UpdateHeadsRef("master", sha1)
 }
 
 // git update-ref refs/heads/master 1a410efbd13591db07496601ebc7a059dd55cfe9
@@ -295,6 +299,18 @@ func (g *Transaction) Tag(tag, sha1, message string) error {
 	}
 	cmd := g.Cmd(params...)
 	return cmd.Run()
+}
+
+func (g *Transaction) Tags(tag string) ([]string, error) {
+	// params := []string{"tag"}
+	cmd := g.Cmd("tag")
+	str, err := g.returnString(cmd)
+
+	if err != nil {
+		return nil, err
+	}
+
+	return strings.Split(str, "\n"), nil
 }
 
 // git gc --auto
