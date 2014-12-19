@@ -257,6 +257,11 @@ func (g *Transaction) CommitTree(sha1, parent string, message io.Reader) (string
 	return g.returnString(cmd)
 }
 
+func (g *Transaction) Commit(message string) error {
+	cmd := g.Cmd("commit", "-m", message)
+	return cmd.Run()
+}
+
 func (g *Transaction) ShowHeadsRef(ref string) (string, error) {
 	// git show-ref --hash --heads refs/heads/master
 	cmd := g.Cmd("show-ref", "--hash", "--heads", "refs/heads/"+ref)
