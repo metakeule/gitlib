@@ -41,8 +41,11 @@ func NewGit(dir string) (g *Git, err error) {
 func (g *Git) IsInitialized() bool {
 	dir := filepath.Join(g.Dir, ".git")
 	info, err := os.Stat(dir)
-	if err != nil {
+	if os.IsNotExist(err) {
 		return false
+	}
+	if err != nil {
+		panic(fmt.Sprintf("Error: can't open dir %#v: %s", dir, err))
 	}
 	if !info.IsDir() {
 		panic(dir + " is no directory")
