@@ -1,6 +1,8 @@
 package gitlib
 
 import (
+	"bytes"
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -77,27 +79,42 @@ type Transaction struct {
 
 // Cmd returns the command for the given params and the given directory
 // using the path of the git binary and the existing environment variables
-func (g *Transaction) Cmd(params ...string) (cmd *exec.Cmd) {
+func (g *Transaction) cmd(params ...string) (cmd *exec.Cmd, errBuffer *bytes.Buffer) {
 	if g.Debug {
 		fmt.Printf("\n%s %s\n", g.BinaryPath, strings.Join(params, " "))
 	}
 	cmd = exec.Command(g.BinaryPath, params...)
 	cmd.Env = g.Env
 	cmd.Dir = g.Dir
-	return cmd
+	var errBf bytes.Buffer
+	cmd.Stderr = &errBf
+	return cmd, &errBf
+}
+
+func (g *Transaction) RunCmd(params ...string) error {
+	cmd, errBf := g.cmd(params...)
+	err := cmd.Run()
+	if err != nil {
+		return errors.New(errBf.String())
+	}
+	return nil
 }
 
 // Exec runs the given params and returns the combined output of stdout and stderr and
 // any errors
 func (g *Transaction) Exec(params ...string) ([]byte, error) {
-	cmd := g.Cmd(params...)
-	return cmd.Output()
-}
-
-func (g *Transaction) returnString(cmd *exec.Cmd) (string, error) {
+	cmd, errBf := g.cmd(params...)
 	out, err := cmd.Output()
 	if err != nil {
-		return "", err
+		err = errors.New(errBf.String())
+	}
+	return out, err
+}
+
+func (g *Transaction) returnString(cmd *exec.Cmd, errBuffer *bytes.Buffer) (string, error) {
+	out, err := cmd.Output()
+	if err != nil {
+		return "", errors.New(errBuffer.String())
 	}
 	return strings.TrimSpace(string(out)), nil
 }
@@ -108,6 +125,7 @@ func (g *Transaction) Init() error {
 }
 
 func (g *Transaction) InitBare() error {
+	panic("don't create bare repos")
 	_, err := g.Exec("init", "--bare")
 	return err
 }
@@ -128,14 +146,13 @@ func (t *Transaction) IsFileKnown(filepath string) (bool, error) {
 // WriteHashObject writes the content of the given reader to the repository inside the given
 // directory. It returns the sha1 hash on success and an error otherwise
 func (g *Transaction) WriteHashObject(rd io.Reader) (string, error) {
-	cmd := g.Cmd("hash-object", "-w", "--stdin")
+	cmd, errBf := g.cmd("hash-object", "-w", "--stdin")
 	cmd.Stdin = rd
-	return g.returnString(cmd)
+	return g.returnString(cmd, errBf)
 }
 
 func (t *Transaction) ResetToHead(path string) error {
-	cmd := t.Cmd("reset", "HEAD", "--", path)
-	return cmd.Run()
+	return t.RunCmd("reset", "HEAD", "--", path)
 }
 
 // git reset HEAD -- .
@@ -146,15 +163,15 @@ func (t *Transaction) ResetToHeadAll() error {
 // WriteHashObjectFile writes the content of the given file to the repository inside the given
 // directory. It returns the sha1 hash on success and an error otherwise
 func (g *Transaction) WriteHashObjectFile(filePath string) (string, error) {
-	cmd := g.Cmd("hash-object", "-w", filePath)
-	return g.returnString(cmd)
+	cmd, errBf := g.cmd("hash-object", "-w", filePath)
+	return g.returnString(cmd, errBf)
 }
 
 // git ls-files 'node/a63/84389-70d7-4199-9d90-4b8b9ba8e3d6'
 // LsFiles returns the file paths that could be found by the given wildcard
 func (t *Transaction) LsFiles(wildcard string) ([]string, error) {
-	cmd := t.Cmd("ls-files", wildcard)
-	out, err := t.returnString(cmd)
+	cmd, errBf := t.cmd("ls-files", wildcard)
+	out, err := t.returnString(cmd, errBf)
 	if err != nil {
 		return nil, err
 	}
@@ -169,14 +186,18 @@ func (t *Transaction) LsFiles(wildcard string) ([]string, error) {
 
 // ReadCatFile reads the object with the given sha1 and writes it to the given writer
 func (g *Transaction) ReadCatFile(sha1 string, wr io.Writer) error {
-	cmd := g.Cmd("cat-file", "-p", sha1)
+	cmd, errBf := g.cmd("cat-file", "-p", sha1)
 	cmd.Stdout = wr
-	return cmd.Run()
+	err := cmd.Run()
+	if err != nil {
+		return errors.New(errBf.String())
+	}
+	return nil
 }
 
 func (g *Transaction) RmIndex(path string) error {
-	cmd := g.Cmd("rm", "--cached", path)
-	return cmd.Run()
+	panic("don't call rmindex")
+	return g.RunCmd("rm", "--cached", path)
 }
 
 // git cat-file -p HEAD:int.go
@@ -186,15 +207,19 @@ func (g *Transaction) ReadCatHeadFile(path string, wr io.Writer) error {
 
 // CatFileType returns the type of the object with the given sha1
 func (g *Transaction) CatFileType(sha1 string) (string, error) {
-	cmd := g.Cmd("cat-file", "-t", sha1)
-	return g.returnString(cmd)
+	cmd, errBf := g.cmd("cat-file", "-t", sha1)
+	return g.returnString(cmd, errBf)
 }
 
 // CatFileTree reads the tree of the last commit on branch to the given writer
 func (g *Transaction) ReadCatFileTree(branch string, wr io.Writer) error {
-	cmd := g.Cmd("cat-file", "-p", branch+"^{tree}")
+	cmd, errBf := g.cmd("cat-file", "-p", branch+"^{tree}")
 	cmd.Stdout = wr
-	return cmd.Run()
+	err := cmd.Run()
+	if err != nil {
+		return errors.New(errBf.String())
+	}
+	return nil
 }
 
 /*
@@ -207,45 +232,43 @@ which specifies a symbolic link
 // UpdateIndexFile updates the index of the given file with the data of the given
 // sha1
 func (g *Transaction) UpdateIndexCache(sha1, filepath string) error {
-	cmd := g.Cmd("update-index", "--cacheinfo", "100644", sha1, filepath)
-	return cmd.Run()
+	return g.RunCmd("update-index", "--cacheinfo", "100644", sha1, filepath)
 }
 
 func (g *Transaction) UpdateIndexCacheExecutable(sha1, filepath string) error {
-	cmd := g.Cmd("update-index", "--cacheinfo", "100755", sha1, filepath)
-	return cmd.Run()
+	return g.RunCmd("update-index", "--cacheinfo", "100755", sha1, filepath)
 }
 
 func (g *Transaction) UpdateIndexCacheLink(sha1, filepath string) error {
-	cmd := g.Cmd("update-index", "--cacheinfo", "120000", sha1, filepath)
-	return cmd.Run()
+	return g.RunCmd("update-index", "--cacheinfo", "120000", sha1, filepath)
+}
+
+//  git update-index --force-remove hu
+func (g *Transaction) RemoveIndex(filepath string) error {
+	return g.RunCmd("update-index", "--force-remove", filepath)
 }
 
 func (g *Transaction) AddIndexCache(sha1, filepath string) error {
-	cmd := g.Cmd("update-index", "--add", "--cacheinfo", "100644", sha1, filepath)
-	return cmd.Run()
+	return g.RunCmd("update-index", "--add", "--cacheinfo", "100644", sha1, filepath)
 }
 
 func (g *Transaction) AddIndexCacheExecutable(sha1, filepath string) error {
-	cmd := g.Cmd("update-index", "--add", "--cacheinfo", "100755", sha1, filepath)
-	return cmd.Run()
+	return g.RunCmd("update-index", "--add", "--cacheinfo", "100755", sha1, filepath)
 }
 
 func (g *Transaction) AddIndexCacheLink(sha1, filepath string) error {
-	cmd := g.Cmd("update-index", "--add", "--cacheinfo", "120000", sha1, filepath)
-	return cmd.Run()
+	return g.RunCmd("update-index", "--add", "--cacheinfo", "120000", sha1, filepath)
 }
 
 // WriteTree writes the index to a tree
 func (g *Transaction) WriteTree() (string, error) {
-	cmd := g.Cmd("write-tree")
-	return g.returnString(cmd)
+	cmd, errBf := g.cmd("write-tree")
+	return g.returnString(cmd, errBf)
 }
 
 // git read-tree --prefix=bak d8329fc1cc938780ffdd9f94e0d364e0ea74f579
 func (g *Transaction) ReadTree(prefix, sha1 string) error {
-	cmd := g.Cmd("read-tree", "--prefix="+prefix, sha1)
-	return cmd.Run()
+	return g.RunCmd("read-tree", "--prefix="+prefix, sha1)
 }
 
 // git commit-tree d8329f
@@ -255,58 +278,51 @@ func (g *Transaction) CommitTree(sha1, parent string, message io.Reader) (string
 	if parent != "" {
 		params = append(params, "-p", parent)
 	}
-	cmd := g.Cmd(params...)
+	cmd, errBf := g.cmd(params...)
 	cmd.Stdin = message
-	return g.returnString(cmd)
+	return g.returnString(cmd, errBf)
 }
 
 func (g *Transaction) Commit(message string) error {
-	cmd := g.Cmd("commit", "-m", message)
-	return cmd.Run()
+	return g.RunCmd("commit", "-m", message)
 }
 
 func (g *Transaction) ShowHeadsRef(ref string) (string, error) {
 	// git show-ref --hash --heads refs/heads/master
-	cmd := g.Cmd("show-ref", "--hash", "--heads", "refs/heads/"+ref)
-	return g.returnString(cmd)
+	cmd, errBf := g.cmd("show-ref", "--hash", "--heads", "refs/heads/"+ref)
+	return g.returnString(cmd, errBf)
 }
 
 // git update-ref refs/heads/master 1a410efbd13591db07496601ebc7a059dd55cfe9
 func (g *Transaction) UpdateHeadsRef(ref, sha1 string) error {
-	cmd := g.Cmd("update-ref", "refs/heads/"+ref, sha1)
-	return cmd.Run()
+	return g.RunCmd("update-ref", "refs/heads/"+ref, sha1)
 }
 
 func (g *Transaction) UpdateTagsRef(ref, sha1 string) error {
-	cmd := g.Cmd("update-ref", "refs/tags/"+ref, sha1)
-	return cmd.Run()
+	return g.RunCmd("update-ref", "refs/tags/"+ref, sha1)
 }
 
 // git symbolic-ref HEAD
 func (g *Transaction) GetSymbolicRef(symref string) (string, error) {
-	cmd := g.Cmd("symbolic-ref", symref)
-	return g.returnString(cmd)
+	cmd, errBf := g.cmd("symbolic-ref", symref)
+	return g.returnString(cmd, errBf)
 }
 
 // git symbolic-ref HEAD refs/heads/test
 func (g *Transaction) SetSymbolicHeadsRef(symref, headsRef string) error {
-	cmd := g.Cmd("symbolic-ref", symref, "refs/heads/"+headsRef)
-	return cmd.Run()
+	return g.RunCmd("symbolic-ref", symref, "refs/heads/"+headsRef)
 }
 
 func (g *Transaction) SetSymbolicTagsRef(symref, tagsRef string) error {
-	cmd := g.Cmd("symbolic-ref", symref, "refs/tags/"+tagsRef)
-	return cmd.Run()
+	return g.RunCmd("symbolic-ref", symref, "refs/tags/"+tagsRef)
 }
 
 func (g *Transaction) PushTags() error {
-	cmd := g.Cmd("push", "--tags")
-	return cmd.Run()
+	return g.RunCmd("push", "--tags")
 }
 
 func (g *Transaction) PushAll() error {
-	cmd := g.Cmd("push", "--all")
-	return cmd.Run()
+	return g.RunCmd("push", "--all")
 }
 
 // git tag -a v1.1 1a410efbd13591db07496601ebc7a059dd55cfe9 -m 'test tag'
@@ -315,14 +331,13 @@ func (g *Transaction) Tag(tag, sha1, message string) error {
 	if message != "" {
 		params = append(params, "-a", "-m", message)
 	}
-	cmd := g.Cmd(params...)
-	return cmd.Run()
+	return g.RunCmd(params...)
 }
 
 func (g *Transaction) Tags() ([]string, error) {
 	// params := []string{"tag"}
-	cmd := g.Cmd("tag")
-	str, err := g.returnString(cmd)
+	cmd, errBf := g.cmd("tag")
+	str, err := g.returnString(cmd, errBf)
 
 	if err != nil {
 		return nil, err
@@ -333,17 +348,19 @@ func (g *Transaction) Tags() ([]string, error) {
 
 // git gc --auto
 func (g *Transaction) GC() error {
-	cmd := g.Cmd("gc", "--auto")
-	return cmd.Run()
+	return g.RunCmd("gc", "--auto")
 }
 
 func (g *Transaction) Fsck() error {
-	cmd := g.Cmd("fsck")
-	return cmd.Run()
+	return g.RunCmd("fsck")
 }
 
 func (g *Transaction) FsckFull(wr io.Writer) error {
-	cmd := g.Cmd("fsck", "--full")
+	cmd, errBf := g.cmd("fsck", "--full")
 	cmd.Stdout = wr
-	return cmd.Run()
+	err := cmd.Run()
+	if err != nil {
+		return errors.New(errBf.String())
+	}
+	return nil
 }
