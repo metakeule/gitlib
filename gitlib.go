@@ -318,11 +318,11 @@ func (g *Transaction) SetSymbolicTagsRef(symref, tagsRef string) error {
 }
 
 func (g *Transaction) PushTags() error {
-	return g.RunCmd("push", "--tags")
+	return g.RunCmd("push", "--tags", "-q")
 }
 
 func (g *Transaction) PushAll() error {
-	return g.RunCmd("push", "--all")
+	return g.RunCmd("push", "--all", "-q")
 }
 
 // git tag -a v1.1 1a410efbd13591db07496601ebc7a059dd55cfe9 -m 'test tag'
